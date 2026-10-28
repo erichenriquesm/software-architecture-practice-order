@@ -1,8 +1,8 @@
-import type { DomainEvent } from '../domainEvents/domainEvent.js';
-import type { OrderAccepted } from '../domainEvents/orderAccepted.js';
-import type { OrderCancelRequested } from '../domainEvents/orderCancelRequested.js';
-import type { OrderPlaced } from '../domainEvents/orderPlaced.js';
-import type { OrderVoided } from '../domainEvents/orderVoided.js';
+import type { DomainEvent } from '../events/domainEvent.js';
+import type { OrderAccepted } from '../events/orderAccepted.js';
+import type { OrderCancelRequested } from '../events/orderCancelRequested.js';
+import type { OrderPlaced } from '../events/orderPlaced.js';
+import type { OrderVoided } from '../events/orderVoided.js';
 import { FillExceedsQuantityError, InvalidOrderDataError, InvalidOrderTransitionError } from '../errors.js';
 import type { AccountId } from '../valueObjects/accountId.js';
 import type { MarketFilters } from '../valueObjects/marketFilters.js';

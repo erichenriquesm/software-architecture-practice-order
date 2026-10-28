@@ -1,8 +1,8 @@
-import type { DomainEvent } from '../../domain/domainEvents/domainEvent.js';
-import type { OrderAccepted } from '../../domain/domainEvents/orderAccepted.js';
-import type { OrderCancelRequested } from '../../domain/domainEvents/orderCancelRequested.js';
-import type { OrderPlaced } from '../../domain/domainEvents/orderPlaced.js';
-import type { OrderVoided } from '../../domain/domainEvents/orderVoided.js';
+import type { DomainEvent } from '../../domain/events/domainEvent.js';
+import type { OrderAccepted } from '../../domain/events/orderAccepted.js';
+import type { OrderCancelRequested } from '../../domain/events/orderCancelRequested.js';
+import type { OrderPlaced } from '../../domain/events/orderPlaced.js';
+import type { OrderVoided } from '../../domain/events/orderVoided.js';
 import type { Database } from '../database/database.js';
 import type { KyselyTransactionRunner } from '../database/kyselyTransactionRunner.js';
 import type { InProcessDomainEventDispatcher } from '../platform/events/inProcessDomainEventDispatcher.js';
