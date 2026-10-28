@@ -28,8 +28,10 @@ Depois, a resposta do `wallet` chega em `src/infra/messaging/consumers/fundsRese
 |---|---|
 | `POST /place_order` | `202 { orderId, status: "pending" }` · `422` fora dos filtros do mercado |
 | `POST /cancel_order` | `202 { orderId, status }` · `403` não é dono · `409` |
-| `GET /accounts/:accountId/orders?status=` | histórico da conta |
-| `GET /orders/:orderId` | uma ordem |
+| `GET /accounts/:accountId/orders?status=` | histórico da conta · `403` se não for a conta do token |
+| `GET /orders/:orderId` | uma ordem · `404` também quando é de outra conta |
+
+**Usuário:** toda rota acima exige o JWT interno do usuário em `Authorization: Bearer …`, que o edge troca pelo cookie de sessão (`aud: order`, assinado pelo `account`, 60 s). Sem token válido → `401 unauthenticated`. O `accountId` vem do `sub` do token, nunca do corpo; um corpo com campo fora do contrato (inclusive `accountId`) → `422`. A chave pública vem de `USER_TOKEN_PUBLIC_KEY` no `.env` ([autenticação §6](https://github.com/erichenriquesm/software-architecture-practice/blob/main/sdd/08-autenticacao-entre-servicos.md)).
 
 **gRPC interno:** Não tem.
 
