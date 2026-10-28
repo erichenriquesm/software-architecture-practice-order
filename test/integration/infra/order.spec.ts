@@ -67,7 +67,7 @@ describe('POST /place_order and the read model', () => {
     const [placed] = await outboxOf(orderId);
     expect(placed?.routing_key).toBe('order.placed');
     const envelope = loadEnvelopeValidator()(placed?.envelope);
-    expect(loadSchemaValidator('src/infra/contracts/published/events/order.placed.v1.schema.json')(envelope.payload)).toMatchObject({ orderId, accountId });
+    expect(loadSchemaValidator('src/infra/schemas/published/events/order.placed.v1.schema.json')(envelope.payload)).toMatchObject({ orderId, accountId });
   });
 
   test('Should answer 422 for a price off the tick, 404 for an unknown order and filter the list by status', async () => {
