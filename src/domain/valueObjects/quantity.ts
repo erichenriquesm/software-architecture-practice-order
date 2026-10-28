@@ -4,6 +4,7 @@ import type { Price } from './price.js';
 
 const scale = 8;
 const decimalText = /^\d+(\.\d+)?$/;
+const maxOrderQuantity = new Decimal('1000000');
 
 /** A non-negative amount of an asset, exact up to 8 decimal places. */
 export class Quantity {
@@ -12,6 +13,13 @@ export class Quantity {
   static from(value: string): Quantity {
     if (!decimalText.test(value)) throw new InvalidOrderDataError('quantity', 'must be a non-negative decimal string');
     return Quantity.of(new Decimal(value));
+  }
+
+  /** The quantity a client asks for: same rules as from, plus a ceiling (stored amounts such as fill value may exceed it). */
+  static ofOrder(value: string): Quantity {
+    const quantity = Quantity.from(value);
+    if (quantity.amount.greaterThan(maxOrderQuantity)) throw new InvalidOrderDataError('quantity', `cannot exceed ${maxOrderQuantity.toString()}`);
+    return quantity;
   }
 
   static zero(): Quantity {

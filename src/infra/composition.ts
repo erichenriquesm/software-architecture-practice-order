@@ -76,7 +76,7 @@ export interface OrderApiDependencies extends OrderCoreDependencies {
   readonly userTokenPublicKey: KeyObject;
   readonly rateLimits?: OrderRateLimits;
   readonly extraProbes?: readonly DependencyProbe[];
-  readonly trustProxy?: string[] | boolean;
+  readonly trustProxy?: (address: string, hop: number) => boolean;
   readonly logger?: boolean;
 }
 

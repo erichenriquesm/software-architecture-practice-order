@@ -34,7 +34,7 @@ export class PlaceOrder {
       accountId: AccountId.from(input.accountId),
       marketId,
       side: Side.from(input.side),
-      quantity: Quantity.from(input.quantity),
+      quantity: Quantity.ofOrder(input.quantity),
       price: Price.from(input.price),
       filters: this.marketCatalog.filtersOf(marketId),
       now: this.clock.now(),

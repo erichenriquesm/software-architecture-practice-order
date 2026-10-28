@@ -2,7 +2,8 @@ import { Redis } from 'ioredis';
 import { buildOrderApi, serviceName } from './composition.js';
 import { createDatabase } from './database/postgres.js';
 import { RedisRateLimiter } from './platform/http/rateLimit/rateLimiter.js';
-import { apiPortSetting, durationSetting, postgresSettings, rateLimitSetting, redisSettings, trustedProxySubnets, userTokenPublicKeySetting } from './settings.js';
+import { createTrustedProxy } from './platform/http/trustedProxy.js';
+import { apiPortSetting, durationSetting, postgresSettings, rateLimitSetting, redisSettings, trustedProxyHostSetting, userTokenPublicKeySetting } from './settings.js';
 
 const db = createDatabase(postgresSettings());
 const redis = new Redis({
@@ -11,6 +12,11 @@ const redis = new Redis({
   commandTimeout: 100,
   maxRetriesPerRequest: 1,
 }).on('error', () => undefined);
+
+const edgeProxy = createTrustedProxy({
+  hostname: trustedProxyHostSetting(),
+  onError: (error) => app.log.warn({ err: error }, 'edge lookup failed, keeping the last known address'),
+});
 
 const { app } = buildOrderApi({
   db,
@@ -24,11 +30,12 @@ const { app } = buildOrderApi({
     privateReadPerAccount: rateLimitSetting('RATE_LIMITS_PRIVATE_READ_PER_ACCOUNT', '300/1m'),
   },
   userTokenPublicKey: userTokenPublicKeySetting(),
-  trustProxy: trustedProxySubnets(),
+  trustProxy: edgeProxy.trust,
   logger: true,
 });
 
 const shutdown = async (): Promise<void> => {
+  edgeProxy.stop();
   await app.close();
   redis.disconnect();
   await db.destroy();
@@ -36,4 +43,5 @@ const shutdown = async (): Promise<void> => {
 process.once('SIGTERM', shutdown);
 process.once('SIGINT', shutdown);
 
+await edgeProxy.start();
 await app.listen({ host: '0.0.0.0', port: apiPortSetting() });
