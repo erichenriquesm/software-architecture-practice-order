@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'vitest';
+import type { OrderView } from '../../../../src/application/contracts/orderDao.js';
 import { AcceptOrder } from '../../../../src/application/usecases/acceptOrder.js';
 import { ApplyFill } from '../../../../src/application/usecases/applyFill.js';
 import { CancelOrder } from '../../../../src/application/usecases/cancelOrder.js';
 import { ExpireOrder } from '../../../../src/application/usecases/expireOrder.js';
+import { GetOrder } from '../../../../src/application/usecases/getOrder.js';
 import { GetOrders } from '../../../../src/application/usecases/getOrders.js';
 import { OrderStore } from '../../../../src/application/usecases/orderStore.js';
 import { PlaceOrder } from '../../../../src/application/usecases/placeOrder.js';
@@ -175,10 +177,24 @@ describe('Use cases: ApplyFill, RegisterRemoval and ExpireOrder', () => {
 
   test('Should refuse an unknown status filter', async () => {
     // Given
-    const getOrders = new GetOrders({ findById: async () => undefined, listByAccount: async () => [], listPendingCreatedBefore: async () => [] });
+    const getOrders = new GetOrders({ findOwnedBy: async () => undefined, listByAccount: async () => [], listPendingCreatedBefore: async () => [] });
 
     // When & Then
     await expect(getOrders.execute(accountId, 'lost')).rejects.toBeInstanceOf(InvalidOrderDataError);
     await expect(getOrders.execute(accountId, 'open')).resolves.toEqual([]);
+  });
+
+  test("Should not find an order of another account, so its existence is not revealed", async () => {
+    // Given
+    const view = { orderId, accountId } as OrderView;
+    const getOrder = new GetOrder({
+      findOwnedBy: async (id, owner) => (id === orderId && owner === accountId ? view : undefined),
+      listByAccount: async () => [],
+      listPendingCreatedBefore: async () => [],
+    });
+
+    // When & Then
+    await expect(getOrder.execute(orderId, accountId)).resolves.toBe(view);
+    await expect(getOrder.execute(orderId, otherAccount)).rejects.toBeInstanceOf(OrderNotFoundError);
   });
 });

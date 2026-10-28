@@ -2,7 +2,7 @@ import { Redis } from 'ioredis';
 import { buildOrderApi, serviceName } from './composition.js';
 import { createDatabase } from './database/postgres.js';
 import { RedisRateLimiter } from './platform/http/rateLimit/rateLimiter.js';
-import { apiPortSetting, durationSetting, postgresSettings, rateLimitSetting, redisSettings, trustedProxySubnets } from './settings.js';
+import { apiPortSetting, durationSetting, postgresSettings, rateLimitSetting, redisSettings, trustedProxySubnets, userTokenPublicKeySetting } from './settings.js';
 
 const db = createDatabase(postgresSettings());
 const redis = new Redis({
@@ -23,6 +23,7 @@ const { app } = buildOrderApi({
     privateReadPerIp: rateLimitSetting('RATE_LIMITS_PRIVATE_READ_PER_IP', '600/1m'),
     privateReadPerAccount: rateLimitSetting('RATE_LIMITS_PRIVATE_READ_PER_ACCOUNT', '300/1m'),
   },
+  userTokenPublicKey: userTokenPublicKeySetting(),
   trustProxy: trustedProxySubnets(),
   logger: true,
 });

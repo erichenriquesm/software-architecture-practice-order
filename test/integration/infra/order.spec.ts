@@ -19,19 +19,21 @@ import { KyselyOrderRepository } from '../../../src/infra/database/kyselyOrderRe
 import type { RateLimiter } from '../../../src/infra/platform/http/rateLimit/rateLimiter.js';
 import { loadEnvelopeValidator } from '../../../src/infra/platform/messaging/envelope.js';
 import { loadSchemaValidator } from '../../../src/infra/platform/messaging/schemas.js';
+import { createUserTokens } from '../../support/userTokens.js';
 import { ExpirePendingOrders } from '../../../src/infra/scheduler/expirePendingOrders.js';
 
 const unlimited: RateLimiter = {
   check: async (check) => ({ allowed: true, remaining: check.policy.limit, resetSeconds: 0, retryAfterSeconds: 0, policy: check.policy }),
 };
 
+const tokens = createUserTokens();
 let database: TestDatabase;
 let app: FastifyInstance;
 let core: OrderCore;
 
 beforeAll(async () => {
   database = await createTestDatabase();
-  ({ app, core } = buildOrderApi({ db: database.db, rateLimiter: unlimited }));
+  ({ app, core } = buildOrderApi({ db: database.db, rateLimiter: unlimited, userTokenPublicKey: tokens.publicKey }));
 });
 
 afterAll(async () => {
@@ -40,7 +42,12 @@ afterAll(async () => {
 });
 
 const placeOrder = (accountId: string, quantity = '0.01', price = '50000') =>
-  app.inject({ method: 'POST', url: '/place_order', payload: { marketId: 'BTC-USD', accountId, side: 'buy', quantity, price } });
+  app.inject({ method: 'POST', url: '/place_order', headers: tokens.bearer(accountId), payload: { marketId: 'BTC-USD', side: 'buy', quantity, price } });
+
+const getAs = (accountId: string, url: string) => app.inject({ method: 'GET', url, headers: tokens.bearer(accountId) });
+
+const cancelAs = (accountId: string, orderId: string) =>
+  app.inject({ method: 'POST', url: '/cancel_order', headers: tokens.bearer(accountId), payload: { orderId } });
 
 const outboxOf = async (orderId: string) =>
   database.db
@@ -62,7 +69,7 @@ describe('POST /place_order and the read model', () => {
     expect(response.statusCode).toBe(202);
     const { orderId, status } = response.json();
     expect(status).toBe('pending');
-    const view = await app.inject({ method: 'GET', url: `/orders/${orderId}` });
+    const view = await getAs(accountId, `/orders/${orderId}`);
     expect(view.json()).toMatchObject({ orderId, accountId, status: 'pending', quantity: '0.01000000', fillQuantity: '0.00000000', fillPrice: null });
     const [placed] = await outboxOf(orderId);
     expect(placed?.routing_key).toBe('order.placed');
@@ -79,9 +86,9 @@ describe('POST /place_order and the read model', () => {
 
     // When
     const offTick = await placeOrder(accountId, '0.01', '50000.001');
-    const unknown = await app.inject({ method: 'GET', url: `/orders/${randomUUID()}` });
-    const openOnly = await app.inject({ method: 'GET', url: `/accounts/${accountId}/orders?status=open` });
-    const all = await app.inject({ method: 'GET', url: `/accounts/${accountId}/orders` });
+    const unknown = await getAs(accountId, `/orders/${randomUUID()}`);
+    const openOnly = await getAs(accountId, `/accounts/${accountId}/orders?status=open`);
+    const all = await getAs(accountId, `/accounts/${accountId}/orders`);
 
     // Then
     expect([offTick.statusCode, unknown.statusCode]).toEqual([422, 404]);
@@ -97,9 +104,9 @@ describe('POST /cancel_order', () => {
     const { orderId } = (await placeOrder(accountId)).json();
 
     // When
-    const foreign = await app.inject({ method: 'POST', url: '/cancel_order', payload: { orderId, accountId: randomUUID() } });
-    const own = await app.inject({ method: 'POST', url: '/cancel_order', payload: { orderId, accountId } });
-    const again = await app.inject({ method: 'POST', url: '/cancel_order', payload: { orderId, accountId } });
+    const foreign = await cancelAs(randomUUID(), orderId);
+    const own = await cancelAs(accountId, orderId);
+    const again = await cancelAs(accountId, orderId);
 
     // Then
     expect([foreign.statusCode, own.statusCode, again.statusCode]).toEqual([403, 202, 409]);
@@ -114,11 +121,86 @@ describe('POST /cancel_order', () => {
     await core.acceptOrder.execute(orderId);
 
     // When
-    const response = await app.inject({ method: 'POST', url: '/cancel_order', payload: { orderId, accountId } });
+    const response = await cancelAs(accountId, orderId);
 
     // Then
     expect(response.json()).toEqual({ orderId, status: 'cancelling' });
     expect((await outboxOf(orderId)).map((row) => row.routing_key)).toEqual(['order.placed', 'order.accepted.BTC-USD', 'order.cancelRequested.BTC-USD']);
+  });
+});
+
+describe('User token', () => {
+  test('Should answer 401 unauthenticated without a token, and let /health through', async () => {
+    // When
+    const anonymous = await app.inject({ method: 'POST', url: '/place_order', payload: { marketId: 'BTC-USD', side: 'buy', quantity: '0.01', price: '50000' } });
+    const health = await app.inject({ method: 'GET', url: '/health' });
+
+    // Then
+    expect(anonymous.statusCode).toBe(401);
+    expect(anonymous.json()).toMatchObject({ error: 'unauthenticated' });
+    expect(health.statusCode).toBe(200);
+  });
+
+  test.each([
+    ['another audience', () => tokens.sign({ sub: randomUUID(), aud: 'wallet' })],
+    ['an expired token', () => tokens.sign({ sub: randomUUID(), iat: 1, exp: 61 })],
+    ['a bad signature', () => `${tokens.sign({ sub: randomUUID() }).slice(0, -4)}AAAA`],
+  ])('Should answer 401 for %s', async (_case, token) => {
+    // When
+    const response = await app.inject({ method: 'GET', url: `/orders/${randomUUID()}`, headers: { authorization: `Bearer ${token()}` } });
+
+    // Then
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({ error: 'unauthenticated' });
+  });
+
+  test('Should answer 422 when the body still carries an accountId', async () => {
+    // Given
+    const accountId = randomUUID();
+
+    // When
+    const response = await app.inject({
+      method: 'POST',
+      url: '/place_order',
+      headers: tokens.bearer(accountId),
+      payload: { marketId: 'BTC-USD', accountId: randomUUID(), side: 'buy', quantity: '0.01', price: '50000' },
+    });
+
+    // Then
+    expect(response.statusCode).toBe(422);
+    expect(await getAs(accountId, `/accounts/${accountId}/orders`).then((list) => list.json())).toEqual([]);
+  });
+
+  test("Should answer 403 for another account's list and 404 for another account's order", async () => {
+    // Given
+    const owner = randomUUID();
+    const stranger = randomUUID();
+    const { orderId } = (await placeOrder(owner)).json();
+
+    // When
+    const list = await getAs(stranger, `/accounts/${owner}/orders`);
+    const order = await getAs(stranger, `/orders/${orderId}`);
+
+    // Then
+    expect(list.statusCode).toBe(403);
+    expect(list.json()).toEqual({ error: 'forbidden' });
+    expect(order.statusCode).toBe(404);
+    expect(order.json()).toMatchObject({ error: 'orderNotFound' });
+  });
+
+  test('Should keep idempotency keys apart per account', async () => {
+    // Given
+    const headers = { 'idempotency-key': randomUUID() };
+    const payload = { marketId: 'BTC-USD', side: 'buy', quantity: '0.01', price: '50000' };
+    const [first, second] = [randomUUID(), randomUUID()];
+
+    // When
+    const mine = await app.inject({ method: 'POST', url: '/place_order', headers: { ...headers, ...tokens.bearer(first) }, payload });
+    const theirs = await app.inject({ method: 'POST', url: '/place_order', headers: { ...headers, ...tokens.bearer(second) }, payload });
+
+    // Then
+    expect(theirs.headers['idempotent-replayed']).toBeUndefined();
+    expect(theirs.json().orderId).not.toBe(mine.json().orderId);
   });
 });
 
@@ -148,7 +230,7 @@ describe('Persistence', () => {
 
     // Then
     expect(await database.db.selectFrom('order').select('order_id').where('order_id', '=', orderId).execute()).toEqual([]);
-    expect(await core.orderDao.findById(orderId)).toBeUndefined();
+    expect(await core.orderDao.findOwnedBy(orderId, order.snapshot.accountId.value)).toBeUndefined();
   });
 });
 
@@ -164,8 +246,8 @@ describe('Saga S2 timeout job', () => {
     await job.runOnce();
 
     // Then
-    expect((await core.getOrder.execute(orderId)).status).toBe('expired');
-    expect((await core.getOrder.execute(orderId)).statusReason).toBe('EXPIRED');
+    expect((await core.getOrder.execute(orderId, accountId)).status).toBe('expired');
+    expect((await core.getOrder.execute(orderId, accountId)).statusReason).toBe('EXPIRED');
     expect((await outboxOf(orderId)).at(-1)?.routing_key).toBe('order.voided');
   });
 });

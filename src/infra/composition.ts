@@ -1,3 +1,4 @@
+import type { KeyObject } from 'node:crypto';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import type { Kysely } from 'kysely';
@@ -22,7 +23,7 @@ import { KyselyOrderRepository } from './database/kyselyOrderRepository.js';
 import { KyselyTransactionRunner } from './database/kyselyTransactionRunner.js';
 import { PostgresProbe } from './database/postgres.js';
 import type { DependencyProbe } from './http/health.js';
-import { registerHealthRoutes } from './http/health.js';
+import { healthRoutes, registerHealthRoutes } from './http/health.js';
 import type { OrderRateLimits } from './http/orderRoutes.js';
 import { defaultOrderRateLimits, orderErrorMappings, orderRateLimitGroups, registerOrderRoutes } from './http/orderRoutes.js';
 import { OutboxEventPublisher } from './messaging/outboxEventPublisher.js';
@@ -31,6 +32,7 @@ import { registerIdempotency } from './platform/http/idempotency/idempotencyPlug
 import { KyselyIdempotencyStore } from './platform/http/idempotency/idempotencyStore.js';
 import type { RateLimiter } from './platform/http/rateLimit/rateLimiter.js';
 import { registerRateLimit } from './platform/http/rateLimit/rateLimitPlugin.js';
+import { registerUserTokenGuard } from './platform/security/userToken.js';
 import { SystemClock, UuidV7Generator } from './system.js';
 
 export const serviceName = 'order';
@@ -71,6 +73,7 @@ export type OrderCore = ReturnType<typeof buildOrderCore>;
 
 export interface OrderApiDependencies extends OrderCoreDependencies {
   readonly rateLimiter: RateLimiter;
+  readonly userTokenPublicKey: KeyObject;
   readonly rateLimits?: OrderRateLimits;
   readonly extraProbes?: readonly DependencyProbe[];
   readonly trustProxy?: string[] | boolean;
@@ -79,8 +82,13 @@ export interface OrderApiDependencies extends OrderCoreDependencies {
 
 export const buildOrderApi = (dependencies: OrderApiDependencies): { app: FastifyInstance; core: OrderCore } => {
   const core = buildOrderCore(dependencies);
-  const app = Fastify({ logger: dependencies.logger ?? false, trustProxy: dependencies.trustProxy ?? false });
+  const app = Fastify({
+    logger: dependencies.logger ?? false,
+    trustProxy: dependencies.trustProxy ?? false,
+    ajv: { customOptions: { removeAdditional: false } },
+  });
   registerErrorMapping(app, orderErrorMappings);
+  registerUserTokenGuard(app, { publicKey: dependencies.userTokenPublicKey, audience: serviceName, publicRoutes: healthRoutes });
   registerRateLimit(app, { limiter: dependencies.rateLimiter, groups: orderRateLimitGroups(dependencies.rateLimits ?? defaultOrderRateLimits) });
   registerIdempotency(app, new KyselyIdempotencyStore(dependencies.db));
   registerHealthRoutes(app, serviceName, [new PostgresProbe(dependencies.db), ...(dependencies.extraProbes ?? [])]);

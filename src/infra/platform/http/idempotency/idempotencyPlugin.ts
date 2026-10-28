@@ -11,7 +11,11 @@ declare module 'fastify' {
   }
 }
 
-const scopeOf = (request: FastifyRequest): string => `${request.method} ${request.routeOptions.url ?? request.url}`;
+/** Keys belong to the user, like Stripe's: two accounts reusing one key never see each other's response. */
+const scopeOf = (request: FastifyRequest): string => {
+  const route = `${request.method} ${request.routeOptions.url ?? request.url}`;
+  return request.userAccountId === undefined ? route : `${route} ${request.userAccountId}`;
+};
 
 const hashOf = (body: unknown): string => createHash('sha256').update(JSON.stringify(body ?? null)).digest('hex');
 

@@ -7,6 +7,8 @@ export interface DependencyProbe {
 
 type Status = 'up' | 'down';
 
+export const healthRoutes: ReadonlySet<string> = new Set(['/health']);
+
 const statusOf = async (probe: DependencyProbe): Promise<[string, Status]> => {
   const healthy = await probe.isHealthy().catch(() => false);
   return [probe.dependency, healthy ? 'up' : 'down'];

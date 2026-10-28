@@ -37,8 +37,9 @@ const acceptedOrder = async (side: string, accountId: string): Promise<string> =
 describe('order.matchingResults consumer', () => {
   test('Should fill both orders of a trade once, even when the same event is delivered twice', async () => {
     // Given
-    const buyOrderId = await acceptedOrder('buy', randomUUID());
-    const sellOrderId = await acceptedOrder('sell', randomUUID());
+    const [buyAccountId, sellAccountId] = [randomUUID(), randomUUID()];
+    const buyOrderId = await acceptedOrder('buy', buyAccountId);
+    const sellOrderId = await acceptedOrder('sell', sellAccountId);
     const definition: ConsumerQueue = {
       queue: broker.uniqueName('order.matchingResults'),
       bindings: [{ exchange: broker.exchange, routingKey: 'matching.#' }],
@@ -64,8 +65,8 @@ describe('order.matchingResults consumer', () => {
         marketId: 'BTC-USD',
         buyOrderId,
         sellOrderId,
-        buyAccountId: randomUUID(),
-        sellAccountId: randomUUID(),
+        buyAccountId,
+        sellAccountId,
         side: 'sell',
         quantity: '1.5',
         price: '100',
@@ -79,10 +80,10 @@ describe('order.matchingResults consumer', () => {
     broker.channel.publish(broker.exchange, 'matching.tradeExecuted.BTC-USD', Buffer.from(JSON.stringify(trade)));
 
     // Then
-    await expect.poll(async () => (await core.getOrder.execute(sellOrderId)).fillQuantity, { timeout: 10_000 }).toBe('1.50000000');
+    await expect.poll(async () => (await core.getOrder.execute(sellOrderId, sellAccountId)).fillQuantity, { timeout: 10_000 }).toBe('1.50000000');
     await new Promise((resolve) => setTimeout(resolve, 300));
-    const buy = await core.getOrder.execute(buyOrderId);
-    const sell = await core.getOrder.execute(sellOrderId);
+    const buy = await core.getOrder.execute(buyOrderId, buyAccountId);
+    const sell = await core.getOrder.execute(sellOrderId, sellAccountId);
     expect([buy.fillQuantity, buy.status, buy.fillPrice]).toEqual(['1.50000000', 'partiallyFilled', '100.00000000']);
     expect([sell.fillQuantity, sell.status]).toEqual(['1.50000000', 'partiallyFilled']);
     await consumer.stop();

@@ -14,6 +14,7 @@ import type { ErrorMapping } from '../platform/http/errors/errorMapping.js';
 import type { RateLimitGroup } from '../platform/http/rateLimit/rateLimitPlugin.js';
 import type { RateLimitPolicy } from '../platform/http/rateLimit/slidingWindow.js';
 import { correlationFrom, withCorrelation } from '../platform/observability/correlation.js';
+import { userAccountIdOf } from '../platform/security/userToken.js';
 
 type Limit = Omit<RateLimitPolicy, 'name'>;
 
@@ -44,12 +45,7 @@ export const orderErrorMappings: readonly ErrorMapping[] = [
   { error: ConcurrentOrderUpdateError, statusCode: 409, code: 'concurrentUpdate' },
 ];
 
-const bodyAccountOf = (request: FastifyRequest): string | undefined => {
-  const accountId = (request.body as { accountId?: unknown } | undefined)?.accountId;
-  return typeof accountId === 'string' ? accountId : undefined;
-};
-
-const paramAccountOf = (request: FastifyRequest): string | undefined => (request.params as { accountId?: string }).accountId;
+const tokenAccountOf = (request: FastifyRequest): string | undefined => request.userAccountId;
 
 const orderRoutes = new Set(['/place_order', '/cancel_order']);
 const readRoutes = new Set(['/accounts/:accountId/orders', '/orders/:orderId']);
@@ -60,15 +56,15 @@ export const orderRateLimitGroups = (limits: OrderRateLimits): readonly RateLimi
     matches: (request) => request.method === 'POST' && orderRoutes.has(request.routeOptions.url ?? ''),
     perIp: limits.ordersPerIp,
     perSubject: [
-      { label: 'account', ...limits.ordersPerAccount, subjectOf: bodyAccountOf },
-      { label: 'accountDaily', ...limits.ordersPerAccountDaily, subjectOf: bodyAccountOf },
+      { label: 'account', ...limits.ordersPerAccount, subjectOf: tokenAccountOf },
+      { label: 'accountDaily', ...limits.ordersPerAccountDaily, subjectOf: tokenAccountOf },
     ],
   },
   {
     name: 'privateRead',
     matches: (request) => request.method === 'GET' && readRoutes.has(request.routeOptions.url ?? ''),
     perIp: limits.privateReadPerIp,
-    perSubject: { label: 'account', ...limits.privateReadPerAccount, subjectOf: paramAccountOf },
+    perSubject: { label: 'account', ...limits.privateReadPerAccount, subjectOf: tokenAccountOf },
     costOf: (request) => (request.routeOptions.url === '/accounts/:accountId/orders' ? 5 : 1),
   },
 ];
@@ -77,16 +73,16 @@ const decimal = { type: 'string', maxLength: 40 } as const;
 
 const placeOrderBody = {
   type: 'object',
-  required: ['marketId', 'accountId', 'side', 'quantity', 'price'],
+  required: ['marketId', 'side', 'quantity', 'price'],
   additionalProperties: false,
-  properties: { marketId: { type: 'string', maxLength: 11 }, accountId: { type: 'string', maxLength: 36 }, side: { type: 'string', maxLength: 4 }, quantity: decimal, price: decimal },
+  properties: { marketId: { type: 'string', maxLength: 11 }, side: { type: 'string', maxLength: 4 }, quantity: decimal, price: decimal },
 } as const;
 
 const cancelOrderBody = {
   type: 'object',
-  required: ['orderId', 'accountId'],
+  required: ['orderId'],
   additionalProperties: false,
-  properties: { orderId: { type: 'string', maxLength: 36 }, accountId: { type: 'string', maxLength: 36 } },
+  properties: { orderId: { type: 'string', maxLength: 36 } },
 } as const;
 
 export interface OrderRouteUseCases {
@@ -101,25 +97,27 @@ const correlationOf = (request: FastifyRequest) => correlationFrom(request.heade
 export const registerOrderRoutes = (app: FastifyInstance, useCases: OrderRouteUseCases): void => {
   app.post('/place_order', { schema: { body: placeOrderBody } }, async (request, reply) => {
     const correlation = correlationOf(request);
-    const placeOrderInput = request.body as PlaceOrderInput;
+    const placeOrderInput: PlaceOrderInput = { ...(request.body as Omit<PlaceOrderInput, 'accountId'>), accountId: userAccountIdOf(request) };
     const orderId = await withCorrelation(correlation, () => useCases.placeOrder.execute(placeOrderInput));
     return reply.status(202).header('x-correlation-id', correlation.correlationId).send({ orderId, status: 'pending' });
   });
 
   app.post('/cancel_order', { schema: { body: cancelOrderBody } }, async (request, reply) => {
     const correlation = correlationOf(request);
-    const { orderId, accountId } = request.body as { orderId: string; accountId: string };
-    const status = await withCorrelation(correlation, () => useCases.cancelOrder.execute(orderId, accountId));
+    const { orderId } = request.body as { orderId: string };
+    const status = await withCorrelation(correlation, () => useCases.cancelOrder.execute(orderId, userAccountIdOf(request)));
     return reply.status(202).header('x-correlation-id', correlation.correlationId).send({ orderId, status });
   });
 
   app.get('/accounts/:accountId/orders', async (request, reply) => {
+    const accountId = userAccountIdOf(request);
+    if ((request.params as { accountId: string }).accountId !== accountId) return reply.status(403).send({ error: 'forbidden' });
     const status = (request.query as { status?: string }).status;
-    return reply.send(await useCases.getOrders.execute(String(paramAccountOf(request)), status));
+    return reply.send(await useCases.getOrders.execute(accountId, status));
   });
 
   app.get('/orders/:orderId', async (request, reply) => {
     const { orderId } = request.params as { orderId: string };
-    return reply.send(await useCases.getOrder.execute(orderId));
+    return reply.send(await useCases.getOrder.execute(orderId, userAccountIdOf(request)));
   });
 };

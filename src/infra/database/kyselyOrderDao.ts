@@ -45,8 +45,14 @@ const viewOf = ({ fillValue, timestamp, ...row }: Row): OrderView => ({
 export class KyselyOrderDao implements OrderDao {
   constructor(private readonly runner: KyselyTransactionRunner<Database>) {}
 
-  async findById(orderId: string): Promise<OrderView | undefined> {
-    const row = await this.runner.executor().selectFrom('order').select(columns).where('order_id', '=', orderId).executeTakeFirst();
+  async findOwnedBy(orderId: string, accountId: string): Promise<OrderView | undefined> {
+    const row = await this.runner
+      .executor()
+      .selectFrom('order')
+      .select(columns)
+      .where('order_id', '=', orderId)
+      .where('account_id', '=', accountId)
+      .executeTakeFirst();
     return row ? viewOf(row) : undefined;
   }
 

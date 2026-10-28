@@ -1,7 +1,9 @@
+import type { KeyObject } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
 import type { PostgresSettings } from './database/postgres.js';
 import { MissingConfigurationError, numberEnv, requiredEnv } from './platform/config/env.js';
 import type { RateLimitPolicy } from './platform/http/rateLimit/slidingWindow.js';
+import { userTokenPublicKey } from './platform/security/userToken.js';
 
 export const apiPortSetting = (): number => numberEnv('API_PORT', 3000);
 
@@ -14,6 +16,9 @@ export const postgresSettings = (): PostgresSettings => ({
   user: requiredEnv('DATABASE_USER'),
   password: requiredEnv('DATABASE_PASSWORD'),
 });
+
+export const userTokenPublicKeySetting = (env: NodeJS.ProcessEnv = process.env): KeyObject =>
+  userTokenPublicKey(requiredEnv('USER_TOKEN_PUBLIC_KEY', env));
 
 export interface RedisSettings {
   readonly host: string;
