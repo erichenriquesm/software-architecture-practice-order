@@ -1,48 +1,66 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import type { TestDatabase } from '../../../support/database.js';
 import { createTestDatabase } from '../../../support/database.js';
+import type { OrderCancelRequested } from '../../../../src/domain/events/orderCancelRequested.js';
 import type { Database } from '../../../../src/infra/database/database.js';
-import { InProcessDomainEventDispatcher } from '../../../../src/infra/platform/events/inProcessDomainEventDispatcher.js';
 import { KyselyTransactionRunner } from '../../../../src/infra/database/kyselyTransactionRunner.js';
+import { OutboxEventPublisher } from '../../../../src/infra/messaging/outboxEventPublisher.js';
 
 let database: TestDatabase;
 let runner: KyselyTransactionRunner<Database>;
-let dispatcher: InProcessDomainEventDispatcher;
+let publisher: OutboxEventPublisher;
 
 beforeAll(async () => {
   database = await createTestDatabase();
   runner = new KyselyTransactionRunner(database.db);
-  dispatcher = new InProcessDomainEventDispatcher().on('thing.happened', async () => {
-    await runner.transaction().insertInto('inbox').values({ consumer: 'handler', message_key: 'from-handler' }).execute();
-  });
+  publisher = new OutboxEventPublisher(runner);
 });
 
 afterAll(() => database.destroy());
 
-const writeAndDispatch = (key: string, fail: boolean) =>
+const writeAndPublish = (key: string, orderId: string, fail: boolean) =>
   runner.run(async () => {
     await runner.executor().insertInto('inbox').values({ consumer: 'repository', message_key: key }).execute();
-    await dispatcher.dispatch([{ type: 'thing.happened', occurredAt: new Date() }]);
-    if (fail) throw new Error('use case failed after dispatch');
+    const event: OrderCancelRequested = { type: 'OrderCancelRequested', occurredAt: new Date(), orderId, marketId: 'BTC-USD' };
+    await publisher.publish([event]);
+    if (fail) throw new Error('use case failed after publishing');
   });
 
-const keys = async () =>
-  (await database.db.selectFrom('inbox').select('message_key').orderBy('message_key').execute()).map((row) => row.message_key);
+const writes = async (key: string, orderId: string) => ({
+  inbox: await database.db.selectFrom('inbox').select('message_key').where('message_key', '=', key).execute(),
+  outbox: await database.db.selectFrom('outbox').select('routing_key').where('envelope', '@>', JSON.stringify({ payload: { orderId } })).execute(),
+});
 
-describe('KyselyTransactionRunner with the in-process dispatcher', () => {
-  test('Should roll back the repository write and the handler write together when the use case fails', async () => {
+describe('KyselyTransactionRunner with the outbox event publisher', () => {
+  test('Should roll back the repository write and the outbox write together when the use case fails', async () => {
+    // Given
+    const orderId = randomUUID();
+
     // When
-    await expect(writeAndDispatch('failed', true)).rejects.toThrowError('use case failed after dispatch');
+    await expect(writeAndPublish('failed', orderId, true)).rejects.toThrowError('use case failed after publishing');
 
     // Then
-    expect(await keys()).toEqual([]);
+    expect(await writes('failed', orderId)).toEqual({ inbox: [], outbox: [] });
   });
 
   test('Should commit both writes in one transaction when the use case succeeds', async () => {
+    // Given
+    const orderId = randomUUID();
+
     // When
-    await writeAndDispatch('committed', false);
+    await writeAndPublish('committed', orderId, false);
 
     // Then
-    expect(await keys()).toEqual(['committed', 'from-handler']);
+    expect(await writes('committed', orderId)).toEqual({
+      inbox: [{ message_key: 'committed' }],
+      outbox: [{ routing_key: 'order.cancelRequested.BTC-USD' }],
+    });
+  });
+
+  test('Should refuse a domain event that has no integration event', async () => {
+    await expect(runner.run(() => publisher.publish([{ type: 'SomethingElse', occurredAt: new Date() }]))).rejects.toThrowError(
+      'No integration event for domain event SomethingElse',
+    );
   });
 });

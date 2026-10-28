@@ -2,11 +2,9 @@ import { InvalidOrderDataError } from '../../domain/errors.js';
 import { AccountId } from '../../domain/valueObjects/accountId.js';
 import type { OrderStatus } from '../../domain/valueObjects/orderStatus.js';
 import { orderStatuses } from '../../domain/valueObjects/orderStatus.js';
-import type { OrderDao } from '../contracts/orderDao.js';
-import type { OrderView } from '../dtos/orderView.js';
-import type { UseCase } from './useCase.js';
+import type { OrderDao, OrderView } from '../contracts/orderDao.js';
 
-export class GetOrders implements UseCase<[accountId: string, status?: string], OrderView[]> {
+export class GetOrders {
   constructor(private readonly orderDao: OrderDao) {}
 
   async execute(rawAccountId: string, status?: string): Promise<OrderView[]> {

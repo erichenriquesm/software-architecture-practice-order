@@ -10,8 +10,6 @@ export interface RetryDependencies {
   readonly sleep?: (ms: number) => Promise<void>;
 }
 
-export const grpcRetryPolicy: RetryPolicy = { baseMs: 100, capMs: 2_000, maxAttempts: 3 };
-
 export const fullJitterDelay = (policy: RetryPolicy, attempt: number, random: () => number): number =>
   Math.floor(random() * Math.min(policy.capMs, policy.baseMs * 2 ** attempt));
 

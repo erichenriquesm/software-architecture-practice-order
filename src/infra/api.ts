@@ -1,7 +1,7 @@
 import { Redis } from 'ioredis';
 import { buildOrderApi, serviceName } from './composition.js';
 import { createDatabase } from './database/postgres.js';
-import { FallbackRateLimiter, InMemoryRateLimiter, RedisRateLimiter } from './platform/http/rateLimit/rateLimiter.js';
+import { RedisRateLimiter } from './platform/http/rateLimit/rateLimiter.js';
 import { apiPortSetting, durationSetting, postgresSettings, rateLimitSetting, redisSettings, trustedProxySubnets } from './settings.js';
 
 const db = createDatabase(postgresSettings());
@@ -15,7 +15,7 @@ const redis = new Redis({
 const { app } = buildOrderApi({
   db,
   pendingTimeoutMs: durationSetting('ORDER_PENDING_TIMEOUT', '2m'),
-  rateLimiter: new FallbackRateLimiter(new RedisRateLimiter(redis, serviceName), new InMemoryRateLimiter(serviceName)),
+  rateLimiter: new RedisRateLimiter(redis, serviceName),
   rateLimits: {
     ordersPerIp: rateLimitSetting('RATE_LIMITS_ORDERS_PER_IP', '100/10s'),
     ordersPerAccount: rateLimitSetting('RATE_LIMITS_ORDERS_PER_ACCOUNT', '50/10s'),

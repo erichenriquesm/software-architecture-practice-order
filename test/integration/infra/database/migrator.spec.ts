@@ -98,7 +98,38 @@ describe('Migrator (Laravel-style batches)', () => {
     await migrator.rollback();
 
     // Then
-    expect(created).toEqual(['idempotency_key', 'inbox', 'migrations', 'order', 'order_view', 'outbox']);
+    expect(created).toEqual(['idempotency_key', 'inbox', 'migrations', 'order', 'outbox']);
     expect(await tables()).toEqual(['migrations']);
+  });
+
+  test('Should move the status of order_view into the order table and bring order_view back on rollback', async () => {
+    // Given
+    const files = await loadMigrationFiles();
+    const beforeMove = files.filter((file) => file.name < '2026_10_28_200003');
+    await new Migrator(db, async () => beforeMove).migrate();
+    const orderId = '0199d5f4-2b9a-7c3e-9a51-000000000001';
+    const accountId = '0199d5f4-2b9a-7c3e-9a51-2f1d3c4b5a69';
+    const createdAt = new Date('2026-10-28T12:00:00Z');
+    await sql`
+      insert into "order" (order_id, market_id, account_id, side, quantity, price, fill_quantity, fill_value, reservation,
+        cancel_requested, created_at, version)
+      values (${orderId}, 'BTC-USD', ${accountId}, 'buy', 3, 101, 3, 302, 'reserved', false, ${createdAt}, 3)`.execute(db);
+    await sql`
+      insert into order_view (order_id, account_id, market_id, side, quantity, price, fill_quantity, fill_price, status,
+        status_reason, timestamp, updated_at)
+      values (${orderId}, ${accountId}, 'BTC-USD', 'buy', 3, 101, 3, 100.66666667, 'filled', null, ${createdAt}, now())`.execute(db);
+    const migrator = new Migrator(db, async () => files);
+
+    // When
+    await migrator.migrate();
+    const moved = await sql<{ status: string; status_reason: string | null }>`select status, status_reason from "order"`.execute(db);
+    const tablesAfterMove = await tables();
+    await migrator.rollback();
+    const restored = await sql<{ status: string; fill_price: string }>`select status, fill_price from order_view`.execute(db);
+
+    // Then
+    expect(moved.rows).toEqual([{ status: 'filled', status_reason: null }]);
+    expect(tablesAfterMove).not.toContain('order_view');
+    expect(restored.rows).toEqual([{ status: 'filled', fill_price: '100.66666667' }]);
   });
 });

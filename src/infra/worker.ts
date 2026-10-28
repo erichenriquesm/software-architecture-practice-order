@@ -5,7 +5,7 @@ import { registerHealthRoutes } from './http/health.js';
 import { classifyOrderFailure } from './messaging/consumers/consumedEvent.js';
 import { fundsReservationHandler, fundsReservationQueue } from './messaging/consumers/fundsReservationConsumer.js';
 import { matchingResultsHandler, matchingResultsQueue, matchingResultsUnits } from './messaging/consumers/matchingResultsConsumer.js';
-import { orderEventsExchange } from './messaging/orderIntegrationEvents.js';
+import { orderEventsExchange } from './messaging/outboxEventPublisher.js';
 import { KyselyIdempotencyStore } from './platform/http/idempotency/idempotencyStore.js';
 import type { AmqpConnection } from './platform/messaging/connection.js';
 import { connectRabbitMq, rabbitMqUrlFromEnv } from './platform/messaging/connection.js';
@@ -13,7 +13,6 @@ import type { ConsumerOptions } from './platform/messaging/consumer.js';
 import { Consumer } from './platform/messaging/consumer.js';
 import { loadEnvelopeValidator } from './platform/messaging/envelope.js';
 import { OutboxRelay } from './platform/messaging/outbox.js';
-import { ReconnectingConnection } from './platform/messaging/reconnectingConnection.js';
 import { declareConsumerQueue } from './platform/messaging/topology.js';
 import { ExpirePendingOrders } from './scheduler/expirePendingOrders.js';
 import { durationSetting, healthPortSetting, postgresSettings } from './settings.js';
@@ -41,23 +40,6 @@ const startConsumer = async (connection: AmqpConnection, options: Omit<ConsumerO
   return consumer;
 };
 
-/** Everything that lives on a broker connection; rebuilt from scratch on every reconnection. */
-const attach = async (connection: AmqpConnection): Promise<() => Promise<void>> => {
-  const relay = new OutboxRelay(db, await connection.createConfirmChannel(), { exchange: orderEventsExchange, lockKey: outboxLockKey });
-  relay.start();
-  const consumers = await Promise.all(consumerOptions.map((options) => startConsumer(connection, options)));
-  return async () => {
-    relay.stop();
-    await Promise.all(consumers.map((consumer) => consumer.stop().catch(() => undefined)));
-  };
-};
-
-const broker = new ReconnectingConnection({
-  connect: () => connectRabbitMq(rabbitMqUrlFromEnv()),
-  setup: attach,
-  onEvent: (event, detail) => log.info({ event, detail: detail instanceof Error ? detail.message : detail }, 'rabbitmq connection'),
-});
-
 const expirePendingOrders = new ExpirePendingOrders({
   orderDao: core.orderDao,
   expireOrder: core.expireOrder,
@@ -71,20 +53,48 @@ expirePendingOrders.start();
 const idempotencyStore = new KyselyIdempotencyStore(db);
 const purge = setInterval(() => void idempotencyStore.purgeExpired(new Date()).catch(() => undefined), purgeIntervalMs);
 
+let connection: AmqpConnection | undefined;
+let stopping = false;
+let detach = async (): Promise<void> => undefined;
+
 const healthServer = Fastify({ logger: false });
 registerHealthRoutes(healthServer, serviceName, [
   new PostgresProbe(db),
-  { dependency: 'rabbitmq', isHealthy: async () => broker.isConnected() },
+  { dependency: 'rabbitmq', isHealthy: async () => connection !== undefined },
 ]);
 await healthServer.listen({ host: '0.0.0.0', port: healthPortSetting() });
-await broker.start();
 
 const shutdown = async (): Promise<void> => {
+  stopping = true;
   clearInterval(purge);
   expirePendingOrders.stop();
-  await broker.stop();
+  await detach();
+  await connection?.close().catch(() => undefined);
   await healthServer.close();
   await db.destroy();
 };
 process.once('SIGTERM', shutdown);
 process.once('SIGINT', shutdown);
+
+/** No in-process reconnect: when the broker connection drops the worker exits and the container restarts it (outbox + inbox make it lossless). */
+const exitOnBrokerLoss = (reason: unknown): void => {
+  if (stopping) return;
+  stopping = true;
+  connection = undefined;
+  log.error({ reason: reason instanceof Error ? reason.message : reason }, 'rabbitmq connection lost, exiting');
+  // Exit at once: closing channels on a dead connection can hang, and the outbox + inbox make a hard exit safe.
+  process.exit(1);
+};
+
+const broker = await connectRabbitMq(rabbitMqUrlFromEnv());
+broker.on('error', exitOnBrokerLoss);
+broker.on('close', exitOnBrokerLoss);
+const relay = new OutboxRelay(db, await broker.createConfirmChannel(), { exchange: orderEventsExchange, lockKey: outboxLockKey });
+relay.start();
+const consumers = await Promise.all(consumerOptions.map((options) => startConsumer(broker, options)));
+detach = async () => {
+  relay.stop();
+  await Promise.all(consumers.map((consumer) => consumer.stop().catch(() => undefined)));
+};
+connection = broker;
+log.info('rabbitmq connected');

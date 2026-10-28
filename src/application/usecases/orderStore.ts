@@ -1,16 +1,16 @@
 import type { Order } from '../../domain/entities/order.js';
 import { OrderNotFoundError } from '../../domain/errors.js';
 import type { OrderId } from '../../domain/valueObjects/orderId.js';
-import type { DomainEventDispatcher } from '../contracts/domainEventDispatcher.js';
+import type { EventPublisher } from '../contracts/eventPublisher.js';
 import type { OrderRepository } from '../contracts/orderRepository.js';
 import type { TransactionRunner } from '../contracts/transactionRunner.js';
 
-/** The steps every order command shares: load the order, then save it and dispatch its events atomically. */
+/** The steps every order command shares: load the order, then save it and publish its events atomically. */
 export class OrderStore {
   constructor(
     private readonly orderRepository: OrderRepository,
     private readonly transactionRunner: TransactionRunner,
-    private readonly domainEventDispatcher: DomainEventDispatcher,
+    private readonly eventPublisher: EventPublisher,
   ) {}
 
   async load(orderId: OrderId): Promise<Order> {
@@ -22,7 +22,7 @@ export class OrderStore {
   persist(order: Order): Promise<void> {
     return this.transactionRunner.run(async () => {
       await this.orderRepository.save(order);
-      await this.domainEventDispatcher.dispatch(order.pullEvents());
+      await this.eventPublisher.publish(order.pullEvents());
     });
   }
 

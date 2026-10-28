@@ -25,8 +25,7 @@ import type { DependencyProbe } from './http/health.js';
 import { registerHealthRoutes } from './http/health.js';
 import type { OrderRateLimits } from './http/orderRoutes.js';
 import { defaultOrderRateLimits, orderErrorMappings, orderRateLimitGroups, registerOrderRoutes } from './http/orderRoutes.js';
-import { registerOrderIntegrationEvents } from './messaging/orderIntegrationEvents.js';
-import { InProcessDomainEventDispatcher } from './platform/events/inProcessDomainEventDispatcher.js';
+import { OutboxEventPublisher } from './messaging/outboxEventPublisher.js';
 import { registerErrorMapping } from './platform/http/errors/errorMapping.js';
 import { registerIdempotency } from './platform/http/idempotency/idempotencyPlugin.js';
 import { KyselyIdempotencyStore } from './platform/http/idempotency/idempotencyStore.js';
@@ -48,10 +47,8 @@ export interface OrderCoreDependencies {
 /** Every use case wired to its adapters; shared by the api and the worker processes. */
 export const buildOrderCore = (dependencies: OrderCoreDependencies) => {
   const runner = new KyselyTransactionRunner(dependencies.db);
-  const dispatcher = new InProcessDomainEventDispatcher();
-  registerOrderIntegrationEvents(dispatcher, runner);
   const clock = dependencies.clock ?? new SystemClock();
-  const store = new OrderStore(new KyselyOrderRepository(runner, clock), runner, dispatcher);
+  const store = new OrderStore(new KyselyOrderRepository(runner), runner, new OutboxEventPublisher(runner));
   const orderDao = new KyselyOrderDao(runner);
   return {
     runner,

@@ -8,12 +8,18 @@ import { Side } from '../../domain/valueObjects/side.js';
 import type { Clock } from '../contracts/clock.js';
 import type { IdGenerator } from '../contracts/idGenerator.js';
 import type { MarketCatalog } from '../contracts/marketCatalog.js';
-import type { PlaceOrderInput } from '../dtos/placeOrderDto.js';
 import type { OrderStore } from './orderStore.js';
-import type { UseCase } from './useCase.js';
+
+export interface PlaceOrderInput {
+  readonly accountId: string;
+  readonly marketId: string;
+  readonly side: string;
+  readonly quantity: string;
+  readonly price: string;
+}
 
 /** Step 1 of saga S2: the order is born pending; balance and account are checked by the wallet. */
-export class PlaceOrder implements UseCase<[input: PlaceOrderInput], string> {
+export class PlaceOrder {
   constructor(
     private readonly orderStore: OrderStore,
     private readonly marketCatalog: MarketCatalog,

@@ -1,4 +1,3 @@
-import type { Clock } from '../../application/contracts/clock.js';
 import type { OrderRepository } from '../../application/contracts/orderRepository.js';
 import { Order } from '../../domain/entities/order.js';
 import { ConcurrentOrderUpdateError } from '../../domain/errors.js';
@@ -12,7 +11,6 @@ import { Side } from '../../domain/valueObjects/side.js';
 import type { Selectable } from 'kysely';
 import type { Database, OrderTable } from './database.js';
 import type { KyselyTransactionRunner } from './kyselyTransactionRunner.js';
-import { projectOrderView } from './orderViewProjector.js';
 
 const orderOf = (row: Selectable<OrderTable>): Order =>
   Order.restore({
@@ -51,17 +49,16 @@ const rowOf = (order: Order) => {
     removal_reason: state.removalReason,
     cancel_requested: state.cancelRequested,
     removed_quantity: state.removedQuantity?.toString() ?? null,
+    status: order.status(),
+    status_reason: order.statusReason(),
     created_at: state.createdAt,
     version: order.nextVersion,
   };
 };
 
-/** Saves the order with an optimistic version check and, in the same transaction, its order_view row. */
+/** Saves the order with an optimistic version check, together with its derived status for the reads. */
 export class KyselyOrderRepository implements OrderRepository {
-  constructor(
-    private readonly runner: KyselyTransactionRunner<Database>,
-    private readonly clock: Clock,
-  ) {}
+  constructor(private readonly runner: KyselyTransactionRunner<Database>) {}
 
   async findById(orderId: OrderId): Promise<Order | undefined> {
     const row = await this.runner.executor().selectFrom('order').selectAll().where('order_id', '=', orderId.value).executeTakeFirst();
@@ -71,7 +68,6 @@ export class KyselyOrderRepository implements OrderRepository {
   async save(order: Order): Promise<void> {
     const saved = order.snapshot.version === 0 ? await this.insert(order) : await this.update(order);
     if (!saved) throw new ConcurrentOrderUpdateError(order.snapshot.orderId.value);
-    await projectOrderView(this.runner.executor(), order, this.clock.now());
   }
 
   private async insert(order: Order): Promise<boolean> {

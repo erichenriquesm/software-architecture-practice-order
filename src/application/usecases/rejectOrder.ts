@@ -3,12 +3,11 @@ import { OrderId } from '../../domain/valueObjects/orderId.js';
 import type { RejectReason } from '../../domain/valueObjects/orderStatus.js';
 import type { OrderStore } from './orderStore.js';
 import { retryOnConflict } from './retryOnConflict.js';
-import type { UseCase } from './useCase.js';
 
 const rejectReasons: readonly RejectReason[] = ['INSUFFICIENT_FUNDS', 'WALLET_NOT_FOUND'];
 
 /** Saga S2 compensation: the wallet refused the reservation; the order ends rejected with the reason. */
-export class RejectOrder implements UseCase<[orderId: string, reason: string], void> {
+export class RejectOrder {
   constructor(private readonly orderStore: OrderStore) {}
 
   async execute(rawOrderId: string, reason: string): Promise<void> {

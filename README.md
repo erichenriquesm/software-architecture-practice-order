@@ -17,8 +17,8 @@ Uma ordem, de ponta a ponta:
 1. `src/infra/http/orderRoutes.ts`: a rota `POST /place_order` recebe a ordem e chama o caso de uso.
 2. `src/application/usecases/placeOrder.ts`: valida contra o catálogo do mercado e cria a ordem.
 3. `src/domain/entities/order.ts`: a ordem, com a máquina de estados e os eventos.
-4. `src/infra/database/kyselyOrderRepository.ts`: grava a ordem (e a visão de leitura) no Postgres.
-5. `src/infra/messaging/orderIntegrationEvents.ts`: transforma o evento em `order.placed` e grava no outbox; o worker publica.
+4. `src/infra/database/kyselyOrderRepository.ts`: grava a ordem no Postgres, com o status derivado (as consultas leem a mesma tabela, via `kyselyOrderDao.ts`).
+5. `src/infra/messaging/outboxEventPublisher.ts`: transforma o evento em `order.placed` e grava no outbox, na mesma transação; o worker publica.
 
 Depois, a resposta do `wallet` chega em `src/infra/messaging/consumers/fundsReservationConsumer.ts` (aceita ou rejeita a ordem) e os fills do `matching` em `matchingResultsConsumer.ts`.
 
@@ -51,7 +51,7 @@ make clone
 make up
 ```
 
-Containers: `order-api` · `order-worker` (consumers, outbox e job de expiração) · `order-db`. Portas no host (só para depurar): REST 3003 · Postgres 5435.
+Containers: `order-api` · `order-worker` (consumers, outbox e job de expiração; se perde a conexão com o RabbitMQ, sai e o Docker o reinicia) · `order-db`. Portas no host (só para depurar): REST 3003 · Postgres 5435.
 
 Dentro da pasta do serviço (`backend/order/`):
 
@@ -66,7 +66,7 @@ Dentro da pasta do serviço (`backend/order/`):
 ```
 src/
   domain/        regras de negócio (entities, valueObjects, events)
-  application/   casos de uso, DTOs e contratos (interfaces)
+  application/   casos de uso (com seus Input/Output) e contratos (interfaces)
   infra/         HTTP, mensageria, banco, plataforma técnica, schemas de eventos
 test/
   unit/  integration/  fakes/  support/

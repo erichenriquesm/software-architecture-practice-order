@@ -1,9 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { PlaceOrderInput } from '../../application/dtos/placeOrderDto.js';
 import type { CancelOrder } from '../../application/usecases/cancelOrder.js';
 import type { GetOrder } from '../../application/usecases/getOrder.js';
 import type { GetOrders } from '../../application/usecases/getOrders.js';
-import type { PlaceOrder } from '../../application/usecases/placeOrder.js';
+import type { PlaceOrder, PlaceOrderInput } from '../../application/usecases/placeOrder.js';
 import {
   ConcurrentOrderUpdateError,
   InvalidOrderDataError,

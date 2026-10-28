@@ -13,7 +13,7 @@ import { OrderId } from '../../../../src/domain/valueObjects/orderId.js';
 import { FakeMarketCatalog } from '../../../fakes/fakeMarketCatalog.js';
 import { fixedClock, fixedIds } from '../../../fakes/fixedSystem.js';
 import { InMemoryOrderRepository } from '../../../fakes/inMemoryOrderRepository.js';
-import { RecordingDomainEventDispatcher } from '../../../fakes/recordingDomainEventDispatcher.js';
+import { RecordingEventPublisher } from '../../../fakes/recordingEventPublisher.js';
 import { RecordingTransactionRunner } from '../../../fakes/recordingTransactionRunner.js';
 
 const accountId = '0199d5f4-2b9a-7c3e-9a51-2f1d3c4b5a69';
@@ -24,12 +24,12 @@ const placeOrderInput = { accountId, marketId: 'BTC-USD', side: 'buy', quantity:
 
 const orderUseCases = (clockNow = now) => {
   const repository = new InMemoryOrderRepository();
-  const dispatcher = new RecordingDomainEventDispatcher();
-  const store = new OrderStore(repository, new RecordingTransactionRunner(), dispatcher);
+  const publisher = new RecordingEventPublisher();
+  const store = new OrderStore(repository, new RecordingTransactionRunner(), publisher);
   const clock = fixedClock(clockNow);
   return {
     repository,
-    dispatcher,
+    publisher,
     placeOrder: new PlaceOrder(store, new FakeMarketCatalog(), fixedIds(orderId), clock),
     cancelOrder: new CancelOrder(store, clock),
     acceptOrder: new AcceptOrder(store, clock),
@@ -40,10 +40,10 @@ const orderUseCases = (clockNow = now) => {
 };
 
 const statusOf = async (useCases: ReturnType<typeof orderUseCases>) => (await useCases.repository.findById(OrderId.from(orderId)))?.status();
-const eventTypes = (useCases: ReturnType<typeof orderUseCases>) => useCases.dispatcher.dispatched.map((event) => event.type);
+const eventTypes = (useCases: ReturnType<typeof orderUseCases>) => useCases.publisher.published.map((event) => event.type);
 
 describe('Use case: PlaceOrder', () => {
-  test('Should save a pending order and dispatch OrderPlaced, answering only the order id', async () => {
+  test('Should save a pending order and publish OrderPlaced, answering only the order id', async () => {
     // Given
     const useCases = orderUseCases();
 
@@ -66,7 +66,7 @@ describe('Use case: PlaceOrder', () => {
 });
 
 describe('Use cases: AcceptOrder and RejectOrder (S2)', () => {
-  test('Should accept and dispatch OrderAccepted, retrying after a conflicting change', async () => {
+  test('Should accept and publish OrderAccepted, retrying after a conflicting change', async () => {
     // Given
     const useCases = orderUseCases();
     await useCases.placeOrder.execute(placeOrderInput);
@@ -162,7 +162,7 @@ describe('Use cases: ApplyFill, RegisterRemoval and ExpireOrder', () => {
     // Given
     const placed = orderUseCases();
     await placed.placeOrder.execute(placeOrderInput);
-    const store = new OrderStore(placed.repository, new RecordingTransactionRunner(), placed.dispatcher);
+    const store = new OrderStore(placed.repository, new RecordingTransactionRunner(), placed.publisher);
     const expireOrder = new ExpireOrder(store, fixedClock(new Date(now.getTime() + 120_001)), 120_000);
 
     // When

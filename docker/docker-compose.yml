@@ -1,6 +1,6 @@
 x-watch: &watch
   watch:
-    - action: sync
+    - action: sync+restart
       path: ../src
       target: /app/src
       ignore: [infra/generated/, infra/schemas/]
@@ -36,7 +36,8 @@ services:
   order-api:
     build: { context: .., dockerfile: docker/Dockerfile, target: dev }
     container_name: order-api
-    command: ["sh", "-c", "npm run proto:gen && npx tsx watch src/infra/api.ts"]
+    restart: unless-stopped
+    command: ["sh", "-c", "npm run proto:gen && exec npx tsx src/infra/api.ts"]
     env_file: ../.env
     ports:
       - "127.0.0.1:3003:3000"
@@ -54,7 +55,8 @@ services:
   order-worker:
     build: { context: .., dockerfile: docker/Dockerfile, target: dev }
     container_name: order-worker
-    command: ["npx", "tsx", "watch", "src/infra/worker.ts"]
+    restart: unless-stopped
+    command: ["npx", "tsx", "src/infra/worker.ts"]
     env_file: ../.env
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3001/health"]

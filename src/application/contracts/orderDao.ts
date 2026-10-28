@@ -1,5 +1,18 @@
 import type { OrderStatus } from '../../domain/valueObjects/orderStatus.js';
-import type { OrderView } from '../dtos/orderView.js';
+
+export interface OrderView {
+  readonly orderId: string;
+  readonly accountId: string;
+  readonly marketId: string;
+  readonly side: string;
+  readonly quantity: string;
+  readonly price: string;
+  readonly fillQuantity: string;
+  readonly fillPrice: string | null;
+  readonly timestamp: string;
+  readonly status: string;
+  readonly statusReason: string | null;
+}
 
 export interface OrderDao {
   findById(orderId: string): Promise<OrderView | undefined>;

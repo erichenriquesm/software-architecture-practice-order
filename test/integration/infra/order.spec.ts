@@ -51,7 +51,7 @@ const outboxOf = async (orderId: string) =>
     .execute();
 
 describe('POST /place_order and the read model', () => {
-  test('Should answer 202 pending, write order and order_view, and publish a valid order.placed', async () => {
+  test('Should answer 202 pending, write the order and publish a valid order.placed', async () => {
     // Given
     const accountId = randomUUID();
 
@@ -123,9 +123,9 @@ describe('POST /cancel_order', () => {
 });
 
 describe('Persistence', () => {
-  test('Should write order and order_view together, or neither when the transaction fails', async () => {
+  test('Should write nothing when the transaction fails after saving the order', async () => {
     // Given
-    const repository = new KyselyOrderRepository(core.runner, fixedClock(new Date()));
+    const repository = new KyselyOrderRepository(core.runner);
     const order = Order.place({
       orderId: OrderId.from(randomUUID()),
       accountId: AccountId.from(randomUUID()),
@@ -148,7 +148,7 @@ describe('Persistence', () => {
 
     // Then
     expect(await database.db.selectFrom('order').select('order_id').where('order_id', '=', orderId).execute()).toEqual([]);
-    expect(await database.db.selectFrom('order_view').select('order_id').where('order_id', '=', orderId).execute()).toEqual([]);
+    expect(await core.orderDao.findById(orderId)).toBeUndefined();
   });
 });
 

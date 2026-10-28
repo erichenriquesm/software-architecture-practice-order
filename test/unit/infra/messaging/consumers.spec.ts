@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { FillExceedsQuantityError } from '../../../../src/domain/errors.js';
-import { averagePrice } from '../../../../src/infra/database/orderViewProjector.js';
+import { averagePrice } from '../../../../src/infra/database/kyselyOrderDao.js';
 import { classifyOrderFailure } from '../../../../src/infra/messaging/consumers/consumedEvent.js';
 import { matchingResultsUnits } from '../../../../src/infra/messaging/consumers/matchingResultsConsumer.js';
 import { createEnvelope } from '../../../../src/infra/platform/messaging/envelope.js';
